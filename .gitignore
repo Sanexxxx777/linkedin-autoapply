@@ -1,0 +1,19 @@
+# секреты и сессии
+.env
+auth_state.json
+auth_state.json.*
+*.key
+
+# состояние/данные
+data/
+.last_session_alert
+.last_summary_date
+
+# отладочные артефакты
+*.bak
+*.bak_*
+
+# python
+__pycache__/
+*.pyc
+venv/
