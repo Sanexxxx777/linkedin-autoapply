@@ -1,10 +1,13 @@
 """Конфиг LinkedIn semi-auto бота.
 Бот НЕ подаёт заявки сам (LinkedIn SDUI Easy Apply блокирует автоматизацию —
 форма в shadow DOM не наполняется). Режим: scan + LLM-скоринг + карточка в TG,
-Саша подаёт сам по ссылке в 2 клика.
+Саша подаёт сам по ссылке.
+
+Ищем ВСЕ релевантные вакансии (не только Easy Apply): scan без f_AL,
+бейдж Easy Apply детектится отдельно. Карточка показывает способ подачи.
 """
 
-# Поисковые запросы LinkedIn (f_AL=true — только Easy Apply)
+# Поисковые запросы LinkedIn (scan без f_AL — и Easy Apply, и внешняя форма)
 KEYWORDS = [
     # backend / core
     "python developer remote",
@@ -31,6 +34,16 @@ KEYWORDS = [
 # LLM-скоринг: слать карточку только если score >= порога
 SCORE_THRESHOLD = 65
 
+# LLM делит источник на 3 типа (agency_type): direct (сам работодатель),
+# staffing (классическое агентство-посредник, ghost jobs/сбор CV), talent_network
+# (Proxify/Toptal/Turing — рабочий канал удалёнки, НЕ штрафуем, метим 🌐).
+# Политика применяется к ЛЮБОМУ staffing (и Easy Apply, и внешним) — оставляем
+# только надёжные агентства (talent_network) + прямых работодателей:
+# "drop" — staffing не слать вовсе (только хорошие/надёжные).
+# "flag" — слать с пометкой ⚠️, но требовать повышенный порог AGENCY_SCORE_THRESHOLD.
+AGENCY_POLICY = "drop"
+AGENCY_SCORE_THRESHOLD = 80
+
 # Сколько новых вакансий максимум обрабатывать за один цикл (защита от API-флуда)
 MAX_PER_CYCLE = 20
 
@@ -46,7 +59,10 @@ CHECK_INTERVAL_MINUTES = 90
 # Макс время одного цикла (сек) до принудительного выхода
 CYCLE_TIMEOUT = 1200
 
-# LLM модель для скоринга (дёшево + json mode)
+# LLM модель для скоринга. Gemini primary (умнее), ключ обновлён 22.06 (рабочий).
+# При 429 (free 15 RPM на пакете 20 вак) ask_llm уходит в fallback-цепочку, где
+# Groq стоит ПЕРВЫМ (claude_client._build_fallback_chain) → быстрый подхват без
+# повторного удара в Gemini. Переключить на Groq основным: SCORING_MODEL="llama-3.3-70b-versatile".
 SCORING_MODEL = "gemini-2.5-flash"
 
 # Профиль кандидата для скоринга релевантности (Саша правит под себя)

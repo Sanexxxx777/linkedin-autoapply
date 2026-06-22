@@ -116,22 +116,23 @@ _fallback_chain_cache = None
 def _build_fallback_chain() -> list:
     """Строим порядок провайдеров с fallback (кэшируется).
 
-    Groq основной (бесплатно), между моделями Groq тоже fallback.
-    Затем Gemini если доступен, затем Anthropic.
+    Groq основной (бесплатно, щедрее по лимитам), между моделями Groq тоже fallback.
+    Gemini ОТОДВИНУТ в конец: free-tier 15 RPM быстро упирается в 429 на пакетном
+    скоринге (20 вакансий/цикл) — держим как последний запас, не как primary.
     """
     global _fallback_chain_cache
     if _fallback_chain_cache is not None:
         return _fallback_chain_cache
 
     chain = []
-    # Primary: Gemini 2.5 Flash (умнее llama-8b, бесплатно)
-    if os.getenv("GEMINI_API_KEY"):
-        chain.append(("gemini", "gemini-2.5-flash"))
-    # Fallback 1: groq с сильной моделью первой
+    # Primary: groq, сильная модель первой
     if os.getenv("GROQ_API_KEY"):
         chain.append(("groq", "llama-3.3-70b-versatile"))
         chain.append(("groq", "llama-3.1-8b-instant"))
         chain.append(("groq", "gemma2-9b-it"))
+    # Fallback 1: Gemini (если квота восстановилась)
+    if os.getenv("GEMINI_API_KEY"):
+        chain.append(("gemini", "gemini-2.5-flash"))
     # Fallback 2: Anthropic если есть
     if os.getenv("ANTHROPIC_API_KEY"):
         chain.append(("anthropic", "claude-haiku-4-5-20251001"))

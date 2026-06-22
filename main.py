@@ -84,6 +84,16 @@ def maybe_daily_summary(seen: dict):
     text = (f'📊 <b>[LinkedIn] сводка за день</b>\n\n'
             f'Просмотрено вакансий: <b>{len(recent)}</b>\n'
             f'Подходящих (отправлено): <b>{len(sent)}</b>')
+    if sent:
+        mark = {'staffing': ' ⚠️', 'talent_network': ' 🌐'}
+        lines = []
+        for v in sorted(sent, key=lambda x: x.get('score', 0), reverse=True)[:40]:
+            label = f"{v.get('title', '?')} — {v.get('company', '')}".strip(' —')
+            tail = f"{v.get('score', '')}/100{mark.get(v.get('agency_type', ''), '')}"
+            url = v.get('url', '')
+            lines.append(f'• <a href="{url}">{label}</a> · {tail}' if url
+                         else f'• {label} · {tail}')
+        text += '\n\n<b>Подходящие:</b>\n' + '\n'.join(lines)
     tg_send(text)
     try:
         with open(SUMMARY_FLAG, 'w') as f:
@@ -124,16 +134,21 @@ def score_job(title: str, company: str, description: str) -> dict:
 Описание: {description[:3000]}
 
 Верни СТРОГО JSON без markdown:
-{{"score": <0-100 целое, насколько вакансия подходит>, "reason": "<1 короткая фраза по-русски почему>"}}"""
+{{"score": <0-100 целое, насколько вакансия подходит>, "agency_type": "<кто разместил: direct=сам работодатель; staffing=рекрутинговое/кадровое агентство-посредник за клиента (часто ghost jobs, сбор резюме); talent_network=сеть/маркетплейс талантов типа Proxify/Toptal/Turing/Andela/A.Team/Crossover>", "reason": "<1 короткая фраза по-русски почему>"}}"""
     try:
         raw = ask_llm(prompt, model=config.SCORING_MODEL, max_tokens=300)
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if not m:
-            return {'score': 0, 'reason': 'LLM не вернул JSON'}
+            return {'score': 0, 'agency_type': 'direct', 'reason': 'LLM не вернул JSON'}
         data = json.loads(m.group(0))
-        return {'score': int(data.get('score', 0)), 'reason': str(data.get('reason', ''))[:200]}
+        at = str(data.get('agency_type', 'direct')).lower()
+        if at not in ('direct', 'staffing', 'talent_network'):
+            at = 'direct'
+        return {'score': int(data.get('score', 0)),
+                'agency_type': at,
+                'reason': str(data.get('reason', ''))[:200]}
     except Exception as e:
-        return {'score': 0, 'reason': f'scoring err: {e}'}
+        return {'score': 0, 'agency_type': 'direct', 'reason': f'scoring err: {e}'}
 
 
 # ---------- браузер ----------
@@ -174,7 +189,7 @@ class LIBrowser:
         return not any(x in cur for x in ('/login', '/checkpoint', '/authwall', '/uas/login'))
 
     def scan(self, keyword: str) -> list:
-        url = ('https://www.linkedin.com/jobs/search/?f_AL=true&keywords='
+        url = ('https://www.linkedin.com/jobs/search/?f_WT=2&keywords='
                + keyword.replace(' ', '%20') + '&sortBy=DD')
         try:
             self.page.goto(url, wait_until='domcontentloaded')
@@ -209,8 +224,11 @@ class LIBrowser:
                     if ce and (ce.inner_text() or '').strip():
                         comp = ce.inner_text().strip()
                         break
+                ct = c.inner_text() or ''
+                easy = ('Easy Apply' in ct) or ('Простая подача' in ct)
                 if (title or jid) and href:
                     jobs.append({'job_id': jid, 'title': title, 'company': comp,
+                                 'easy_apply': easy,
                                  'url': ('https://www.linkedin.com' + href.split('?')[0])
                                  if href.startswith('/') else href.split('?')[0]})
             except Exception:
@@ -314,16 +332,34 @@ def run_once():
         for j in fresh:
             desc = br.get_description(j['url'])
             sc = score_job(j['title'], j['company'], desc)
-            print(f"  • [{sc['score']}] {j['title']} — {j['company']}: {sc['reason']}", flush=True)
+            easy = j.get('easy_apply', False)
+            atype = sc.get('agency_type', 'direct')
+            staffing = atype == 'staffing'      # классическое агентство-посредник → штраф
+            talent = atype == 'talent_network'  # сеть талантов (Proxify/Toptal) → хороший канал
+            tag = {'staffing': ' STAFFING', 'talent_network': ' TALENT'}.get(atype, '')
+            print(f"  • [{sc['score']}]{' EASY' if easy else ''}{tag} "
+                  f"{j['title']} — {j['company']}: {sc['reason']}", flush=True)
             seen[j['job_id']] = {'ts': int(time.time()), 'title': j['title'],
-                                 'company': j['company'], 'score': sc['score'], 'sent': False}
-            if sc['score'] >= config.SCORE_THRESHOLD:
+                                 'company': j['company'], 'score': sc['score'],
+                                 'easy_apply': easy, 'agency_type': atype,
+                                 'url': j['url'], 'sent': False}
+            # staffing (агентства-посредники, ghost jobs) режем всегда — оставляем только
+            # надёжные: talent_network (Proxify/Toptal) + direct (сам работодатель).
+            drop = staffing and config.AGENCY_POLICY == 'drop'
+            thr = config.AGENCY_SCORE_THRESHOLD if staffing else config.SCORE_THRESHOLD
+            if not drop and sc['score'] >= thr:
+                apply_line = ('Easy Apply — подай сам в 2 клика по кнопке ниже.' if easy
+                              else 'Внешняя форма на сайте компании — открой по кнопке ниже.')
+                badge = ('⚠️ <b>Рекрутинговое агентство</b> (часто ghost jobs)\n' if staffing
+                         else '🌐 <b>Talent-сеть</b> (Proxify/Toptal — рабочий канал удалёнки)\n' if talent
+                         else '')
                 card = (f"🔗 <b>[LinkedIn]</b> подходящая вакансия\n\n"
+                        f"{badge}"
                         f"<b>{j['title']}</b>\n"
                         f"🏢 {j['company']}\n"
                         f"🎯 Релевантность: <b>{sc['score']}/100</b>\n"
                         f"💬 {sc['reason']}\n\n"
-                        f"<i>Easy Apply — подай сам в 2 клика по кнопке ниже.</i>")
+                        f"<i>{apply_line}</i>")
                 tg_send(card, url=j['url'])
                 seen[j['job_id']]['sent'] = True
                 new_count += 1
