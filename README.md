@@ -42,4 +42,4 @@ DRY_RUN=1 python3 main.py --once   # печать карточек вместо 
 
 ## Автор
 
-Aleksandr Shulgin ([@Sanexxxx777](https://github.com/Sanexxxx777))
+Aleksandr Shulgin ([@Sanexxxx777](https://github.com/Sanexxxx777)) (@Aleksandr_NFA)
