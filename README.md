@@ -1,6 +1,5 @@
 # linkedin-autoapply
 
-<!-- TODO: demo GIF (20-40s) — record with screen capture, see /Users/sasha/.claude memory reference_browser_automation_demo_reel or ghostty recorder -->
 
 Полуавтоматический сканер вакансий LinkedIn: ищет Easy Apply вакансии по ключевым
 запросам, оценивает релевантность через LLM и присылает карточки подходящих в Telegram.
