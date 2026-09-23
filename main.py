@@ -290,9 +290,10 @@ def run_once():
     try:
         if not br.is_logged_in():
             vnc_pass = os.getenv('VNC_PASSWORD', '—')
+            vnc_url = os.getenv('VNC_URL', 'vnc://localhost:5903')
             msg = ('🚨 <b>[LinkedIn] сессия протухла</b>\n\n'
                    'Нужен релогин через VNC:\n'
-                   f'<code>vnc://45.82.95.134:5903</code> (пароль <code>{vnc_pass}</code>)\n'
+                   f'<code>{vnc_url}</code> (пароль <code>{vnc_pass}</code>)\n'
                    'Открой Chromium, залогинься. Затем: <code>python3 do_login.py</code>')
             # throttle: не спамим алертом о сессии чаще раза в 3 часа
             now = time.time()
